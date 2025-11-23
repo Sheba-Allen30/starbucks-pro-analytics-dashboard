@@ -4,7 +4,9 @@ Starbucks Pro — Analytics & ML (Emerald Theme) — About UI enhanced (Side-by-
 - Sidebar reduced to only: CSV upload & page navigation (tabs)
 - About page: Rajagiri + Grant Thornton logos side-by-side (140px each)
 - LinkedIn added under Sheba's name
-- model.pkl is saved to working directory when training completes (Option A)
+- Uses local logo paths:
+    C:/Users/SHEBA/Documents/rajagiri.png
+    C:/Users/SHEBA/Documents/grand.jpeg
 """
 
 import streamlit as st
@@ -15,10 +17,8 @@ import seaborn as sns
 import base64
 import tempfile
 import json
-import joblib
 from pathlib import Path
 from io import BytesIO
-from PIL import Image
 
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression, LogisticRegression
@@ -28,7 +28,7 @@ from sklearn.metrics import (mean_squared_error, r2_score,
                              f1_score, classification_report, confusion_matrix)
 from sklearn.preprocessing import LabelEncoder
 
-# Optional libs (Lottie + fpdf)
+# Optional libs
 try:
     from streamlit_lottie import st_lottie
     LOTTIE_AVAILABLE = True
@@ -44,19 +44,16 @@ except Exception:
 # -------------------------
 # Default user paths (from conversation)
 # -------------------------
-DEFAULT_CSV = Path("C:/Users/SHEBA/Documents/starbucks.csv")  # optional default dataset
-DEFAULT_LOGO = Path("C:/Users/SHEBA/Documents/starbucks.png")  # optional small watermark/logo
+DEFAULT_CSV = Path("C:/Users/SHEBA/Documents/starbucks.csv")
+DEFAULT_LOGO = Path("C:/Users/SHEBA/Documents/starbucks.png")
 
-# User-provided logos (exact Windows paths you asked for)
+# User-provided logos (use the exact paths you requested)
 RCSS_LOCAL = Path(r"C:/Users/SHEBA/Documents/rajagiri.png")
 GRANT_LOCAL = Path(r"C:/Users/SHEBA/Documents/grand.jpeg")
 
-# Fallback container images (developer-provided)
+# Fallback container images (if exist in /mnt/data)
 RCSS_FALLBACK = Path("/mnt/data/fbed8862-e4ff-4218-8008-8ad9bbed415e.png")
 GRANT_FALLBACK = Path("/mnt/data/e0e0713b-c281-4a62-b35a-623830e23dcf.png")
-
-# Where to save model.pkl (Option A)
-MODEL_PATH = Path("./model.pkl")
 
 # -------------------------
 # Styling: Emerald Theme (CSS)
@@ -115,9 +112,12 @@ def inject_emerald_css():
     .team-name { font-weight:700; color:var(--cream); }
     .team-role { color: rgba(235,248,240,0.8); font-size:13px; margin-top:4px; }
     .small-muted { font-size:13px; color: rgba(235,248,240,0.78); }
+    /* Minimal sidebar style (clean) */
+    .block-container .sidebar .element-container { padding-top:6px; }
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
+
 
 # -------------------------
 # Animated cup fallback (SVG + CSS keyframes)
@@ -245,36 +245,6 @@ def classification_metrics(y_true, y_pred):
     return {"Accuracy": float(acc), "Precision": float(prec), "Recall": float(rec), "F1": float(f1)}
 
 # -------------------------
-# Safe image loader (returns tuple: mime, base64 string)
-# -------------------------
-def safe_image_b64(path_candidates):
-    """
-    path_candidates: list[Path]
-    returns: (mime, b64) or (None, None)
-    """
-    for p in path_candidates:
-        try:
-            if p and p.exists():
-                data = p.read_bytes()
-                suffix = p.suffix.lower()
-                mime = "image/png" if suffix.endswith("png") else "image/jpeg" if suffix.endswith(("jpg", "jpeg")) else None
-                if mime is None:
-                    # try to detect with PIL
-                    try:
-                        img = Image.open(BytesIO(data))
-                        mime = "image/png"
-                        out = BytesIO()
-                        img.save(out, format="PNG")
-                        data = out.getvalue()
-                    except Exception:
-                        mime = "image/png"
-                b64 = base64.b64encode(data).decode()
-                return mime, b64
-        except Exception:
-            continue
-    return None, None
-
-# -------------------------
 # Lottie helper
 # -------------------------
 def try_load_lottie(path_or_url: str):
@@ -295,14 +265,20 @@ def try_load_lottie(path_or_url: str):
 # -------------------------
 def main():
     st.set_page_config(page_title="Starbucks Pro — Emerald", layout="wide", initial_sidebar_state="expanded")
+
+    # Inject styling
     inject_emerald_css()
 
-    # Sidebar (minimal)
-    st.sidebar.title("")  # keep compact
+    # -------------------------
+    # Sidebar: minimal & professional
+    # Only: CSV upload + Page navigation radio (tabs)
+    # -------------------------
+    st.sidebar.title("")  # keep sidebar compact
     uploaded_file = st.sidebar.file_uploader("Upload Starbucks CSV", type=["csv"], key="csv_upload")
+    # Navigation lives on the main layout but we also provide it in the sidebar as required by Streamlit layout expectation:
     page = st.sidebar.radio("", ["Overview", "EDA (All Charts)", "Modeling & Comparison", "Prediction Playground", "Export Report", "About / Team"])
 
-    # Header
+    # Header (main)
     col1, col2 = st.columns([0.78, 0.22])
     with col1:
         st.markdown("<div class='header-container'>", unsafe_allow_html=True)
@@ -310,7 +286,7 @@ def main():
         st.markdown("<div style='margin-left:6px'><div class='subtitle'>Professional Emerald theme • EDA • Modeling • Predictions</div></div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
     with col2:
-        # small decorative cup (svg or lottie)
+        # show small decorative cup (svg or lottie) at header right
         if LOTTIE_AVAILABLE:
             lottie_url = "https://assets2.lottiefiles.com/packages/lf20_0yfsb3a1.json"
             lottie_json = try_load_lottie(lottie_url)
@@ -331,12 +307,13 @@ def main():
     if df is None:
         st.stop()
 
-    # Clean numeric-like columns
+    # initial cleaning
     df = clean_numeric_like_columns(df)
+
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     categorical_cols = df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
 
-    # -------- PAGES (Overview, EDA, Modeling, Playground, Export, About) ----------
+    # ---------- Pages ----------
     if page == "Overview":
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("Dataset Overview")
@@ -364,13 +341,17 @@ def main():
             fig, ax = plt.subplots(figsize=(9,3))
             ax.hist(df[sel_col].dropna(), bins=28, color="#0b6b48", edgecolor="#083", linewidth=0.6, alpha=0.95)
             ax.set_title(f"Distribution of {sel_col}", fontsize=12)
-            ax.set_xlabel(sel_col); ax.set_ylabel("Frequency")
+            ax.set_xlabel(sel_col)
+            ax.set_ylabel("Frequency")
             st.pyplot(fig)
+
             fig2, ax2 = plt.subplots(figsize=(9,2.6))
             sns.boxplot(x=df[sel_col].dropna(), ax=ax2, color="#cdeccf")
-            ax2.set_title(f"Boxplot of {sel_col}"); ax2.set_xlabel(sel_col)
+            ax2.set_title(f"Boxplot of {sel_col}")
+            ax2.set_xlabel(sel_col)
             st.pyplot(fig2)
-            st.write("**Explanation:** Histogram shows ranges and skewness. Boxplot shows median, IQR and outliers.")
+
+            st.write("**Explanation:** Histogram shows common ranges and skewness. Boxplot shows median, IQR and outliers.")
         else:
             st.info("No numeric columns available.")
         st.markdown("</div>", unsafe_allow_html=True)
@@ -383,7 +364,9 @@ def main():
             sc_y = st.selectbox("Y-axis", numeric_cols, index=1, key="scy")
             fig_s, ax_s = plt.subplots(figsize=(8,4))
             ax_s.scatter(df[sc_x], df[sc_y], s=48, alpha=0.75, edgecolor="#fff", linewidth=0.4, color="#ffd59e")
-            ax_s.set_xlabel(sc_x); ax_s.set_ylabel(sc_y); ax_s.set_title(f"{sc_y} vs {sc_x}")
+            ax_s.set_xlabel(sc_x)
+            ax_s.set_ylabel(sc_y)
+            ax_s.set_title(f"{sc_y} vs {sc_x}")
             st.pyplot(fig_s)
             st.write("**Explanation:** Useful to see linear/non-linear relations and clusters.")
         else:
@@ -401,11 +384,15 @@ def main():
             ax_p.pie(top, labels=top.index, autopct="%1.1f%%", startangle=140, colors=sns.color_palette("Greens"))
             ax_p.set_title(f"Top categories — {cat_sel}")
             st.pyplot(fig_p)
+
             fig_b, ax_b = plt.subplots(figsize=(8,3))
             top.plot.bar(ax=ax_b, color="#0b6b48")
-            ax_b.set_xlabel(cat_sel); ax_b.set_ylabel("Count"); ax_b.set_title(f"Counts — top values of {cat_sel}")
+            ax_b.set_xlabel(cat_sel)
+            ax_b.set_ylabel("Count")
+            ax_b.set_title(f"Counts — top values of {cat_sel}")
             st.pyplot(fig_b)
-            st.write("**Explanation:** Identify dominant classes and potential imbalances.")
+
+            st.write("**Explanation:** Identify dominant classes and potential imbalances before classification modeling.")
         else:
             st.info("No categorical columns detected.")
         st.markdown("</div>", unsafe_allow_html=True)
@@ -416,7 +403,9 @@ def main():
         if numeric_cols and len(numeric_cols) > 1:
             fig_h, ax_h = plt.subplots(figsize=(10,6))
             sns.heatmap(df[numeric_cols].corr(), annot=True, cmap="YlGn", fmt=".2f", ax=ax_h, linewidths=0.4)
-            ax_h.set_title("Correlation Heatmap"); ax_h.set_xlabel("Features"); ax_h.set_ylabel("Features")
+            ax_h.set_title("Correlation Heatmap")
+            ax_h.set_xlabel("Features")
+            ax_h.set_ylabel("Features")
             st.pyplot(fig_h)
             st.write("**Explanation:** Look for strongly correlated features.")
         else:
@@ -501,7 +490,6 @@ def main():
                         st.write("Classification Report:")
                         st.text(classification_report(y_test, preds, zero_division=0))
 
-                # Save last training info
                 st.session_state["last_train"] = {
                     "features": features,
                     "features_encoded": X_enc.columns.tolist(),
@@ -511,37 +499,6 @@ def main():
                     "y_test": y_test,
                     "models": list(trained.keys())
                 }
-
-                # ------------------
-                # Save best model to model.pkl (Option A)
-                # Choose best model: regression -> lowest RMSE, classification -> highest Accuracy
-                # ------------------
-                best_name = None
-                if not metrics_df.empty:
-                    if problem == "regression":
-                        # choose lowest RMSE
-                        metrics_df_r = metrics_df.copy()
-                        if "RMSE" in metrics_df_r.columns:
-                            best_name = metrics_df_r["RMSE"].idxmin()
-                    else:
-                        # choose highest Accuracy
-                        metrics_df_r = metrics_df.copy()
-                        if "Accuracy" in metrics_df_r.columns:
-                            best_name = metrics_df_r["Accuracy"].idxmax()
-
-                if best_name and best_name in trained:
-                    best_model_obj = trained[best_name]["model"]
-                    try:
-                        joblib.dump(best_model_obj, MODEL_PATH)
-                        st.success(f"Best model ({best_name}) saved to `{MODEL_PATH}`.")
-                        # provide download button
-                        with open(MODEL_PATH, "rb") as f:
-                            model_bytes = f.read()
-                        st.download_button("Download model.pkl", data=model_bytes, file_name="model.pkl", mime="application/octet-stream")
-                    except Exception as e:
-                        st.error(f"Failed to save model: {e}")
-                else:
-                    st.info("Could not determine best model automatically; no model saved.")
 
     elif page == "Prediction Playground":
         st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -566,6 +523,7 @@ def main():
                 else:
                     Xnew = pd.DataFrame([user_vals])
                     Xnew_enc = auto_encode_features(Xnew)
+                    # align columns
                     for col in meta["features_encoded"]:
                         if col not in Xnew_enc.columns:
                             Xnew_enc[col] = 0
@@ -638,17 +596,22 @@ def main():
         with colA:
             st.markdown('<div class="about-logos-row">', unsafe_allow_html=True)
 
-            rcss_mime, rcss_b64 = safe_image_b64([RCSS_LOCAL, RCSS_FALLBACK])
-            grant_mime, grant_b64 = safe_image_b64([GRANT_LOCAL, GRANT_FALLBACK])
+            # RCSS logo logic: prefer user's local path, then fallback container
+            rcss_to_show = RCSS_LOCAL if RCSS_LOCAL.exists() else (RCSS_FALLBACK if RCSS_FALLBACK.exists() else None)
+            grant_to_show = GRANT_LOCAL if GRANT_LOCAL.exists() else (GRANT_FALLBACK if GRANT_FALLBACK.exists() else None)
 
-            if rcss_b64:
-                st.markdown(f'<div class="logo-card"><img src="data:{rcss_mime};base64,{rcss_b64}" width="140" /></div>', unsafe_allow_html=True)
+            if rcss_to_show:
+                st.markdown(f'<div class="logo-card"><img src="data:image/png;base64,{base64.b64encode(rcss_to_show.read_bytes()).decode()}" width="140" /></div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="logo-caption">Rajagiri College of Social Sciences</div>', unsafe_allow_html=True)
             else:
                 st.markdown('<div class="logo-card"><div class="small-muted">RCSS logo not found</div></div>', unsafe_allow_html=True)
 
-            if grant_b64:
-                st.markdown(f'<div class="logo-card"><img src="data:{grant_mime};base64,{grant_b64}" width="140" /></div>', unsafe_allow_html=True)
+            if grant_to_show:
+                # grant could be jpeg; read bytes and base64 encode but keep src data URI generic
+                grant_b64 = base64.b64encode(grant_to_show.read_bytes()).decode()
+                # determine MIME (png/jpeg)
+                mime = "image/png" if grant_to_show.suffix.lower().endswith(".png") else "image/jpeg"
+                st.markdown(f'<div class="logo-card"><img src="data:{mime};base64,{grant_b64}" width="140" /></div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="logo-caption">Grant Thornton (Add-On Partner)</div>', unsafe_allow_html=True)
             else:
                 st.markdown('<div class="logo-card"><div class="small-muted">Grant Thornton logo not found</div></div>', unsafe_allow_html=True)
@@ -724,6 +687,7 @@ def main():
                 st.markdown(f"<div class='team-name'>{name}</div>", unsafe_allow_html=True)
                 st.markdown(f"<div class='team-role'>{role}</div>", unsafe_allow_html=True)
                 if linkedin:
+                    # show LinkedIn as clickable link
                     st.markdown(f"<div style='margin-top:8px'><a href='{linkedin}' target='_blank' style='color:#dbeee2;'>LinkedIn</a></div>", unsafe_allow_html=True)
                 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -733,7 +697,7 @@ def main():
         st.markdown("<div class='small-muted'>Built with collaboration, learning, and lots of coffee ☕</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Footer watermark (optional Starbucks logo)
+    # Footer watermark (optional Starbucks logo if present)
     try:
         if DEFAULT_LOGO.exists():
             b = base64.b64encode(DEFAULT_LOGO.read_bytes()).decode()
